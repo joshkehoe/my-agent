@@ -201,18 +201,18 @@ def test_a2a_chat_stream(server_fixture: subprocess.Popen[str]) -> None:
             return chunk.task.status.state == TaskState.TASK_STATE_COMPLETED
         return False
 
-    assert any(
-        _is_completed(chunk) for chunk in responses
-    ), "No completed task received from stream"
+    assert any(_is_completed(chunk) for chunk in responses), (
+        "No completed task received from stream"
+    )
 
 
 def test_agent_card(server_fixture: subprocess.Popen[str]) -> None:
     """Test that the A2A agent card is served at the well-known URI."""
     for _ in range(3):
         response = requests.get(AGENT_CARD_URL, timeout=10)
-        assert (
-            response.status_code == 200
-        ), f"A2A endpoint returned {response.status_code}"
+        assert response.status_code == 200, (
+            f"A2A endpoint returned {response.status_code}"
+        )
 
         served_agent_card = response.json()
         # supportedInterfaces is the A2A 1.0 marker (replaces url/preferredTransport).
@@ -233,9 +233,9 @@ def test_agent_card(server_fixture: subprocess.Popen[str]) -> None:
             if i.get("protocolBinding") == "JSONRPC"
             and i.get("protocolVersion") == "0.3"
         ]
-        assert (
-            len(v03_interfaces) == 1
-        ), f"Expected exactly one v0.3 interface, found {len(v03_interfaces)}"
+        assert len(v03_interfaces) == 1, (
+            f"Expected exactly one v0.3 interface, found {len(v03_interfaces)}"
+        )
 
 
 def test_reasoning_engine_stream(server_fixture: subprocess.Popen[str]) -> None:
