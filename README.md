@@ -92,3 +92,18 @@ Built-in telemetry exports to Cloud Trace, BigQuery, and Cloud Logging.
 
 This agent supports the [A2A Protocol](https://a2a-protocol.org/). Use the [A2A Inspector](https://github.com/a2aproject/a2a-inspector) to test interoperability.
 See the [A2A Inspector docs](https://github.com/a2aproject/a2a-inspector) for details.
+
+## AI-native PM learning feed
+
+The agent curates learning material for becoming an AI-native product manager, focused on
+[Product Faculty](https://productfaculty.com) and its founder and instructors. Items are grouped by
+topic with short bullet summaries, and you can mark them read, save them for later, or dismiss them.
+
+- **Chat with it:** `agents-cli playground`, then ask e.g. "what's new on evals?" or "save item 4".
+- **Browse and triage:** `uv run uvicorn app.feed.web:app --port 8090`, then open <http://127.0.0.1:8090>.
+- **Refresh content:** `uv run python -m app.feed.ingest` (reads the Product Faculty sitemap and searches the
+  web for the instructors' recent public writing; never LinkedIn). Existing items and your read /
+  saved / dismissed choices are never overwritten.
+
+Data is stored locally in `data/feed.db` (git-ignored). Set `FEED_DB_PATH` to move it.
+Sources and topics live in `app/feed/sources.py`.
