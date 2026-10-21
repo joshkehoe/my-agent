@@ -23,11 +23,25 @@ CREATE TABLE IF NOT EXISTS items (
     published TEXT NOT NULL DEFAULT '',
     found_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','read','bookmarked','dismissed')),
-    status_updated_at TEXT
+    status_updated_at TEXT,
+    starred INTEGER NOT NULL DEFAULT 0,
+    notes TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_topic ON items(topic);
 """
+
+MAX_NOTES_CHARS = 5000
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring databases created before favorites/notes existed up to date."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(items)")}
+    if "starred" not in cols:
+        conn.execute("ALTER TABLE items ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+    if "notes" not in cols:
+        conn.execute("ALTER TABLE items ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_starred ON items(starred)")
 
 
 def db_path() -> Path:
@@ -41,6 +55,7 @@ def connect():
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     try:
         yield conn
         conn.commit()
@@ -55,6 +70,7 @@ def _now() -> str:
 def _row_to_item(row: sqlite3.Row) -> dict:
     item = dict(row)
     item["bullets"] = json.loads(item["bullets"])
+    item["starred"] = bool(item["starred"])
     return item
 
 
@@ -103,16 +119,39 @@ def set_status(item_id: int, status: str) -> bool:
         return cur.rowcount == 1
 
 
+def set_star(item_id: int, starred: bool) -> bool:
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE items SET starred = ? WHERE id = ?", (int(starred), item_id)
+        )
+        return cur.rowcount == 1
+
+
+def set_notes(item_id: int, notes: str) -> bool:
+    """Replace the user's notes on an item (kept even if the star is later removed)."""
+    notes = notes.strip()[:MAX_NOTES_CHARS]
+    with connect() as conn:
+        cur = conn.execute("UPDATE items SET notes = ? WHERE id = ?", (notes, item_id))
+        return cur.rowcount == 1
+
+
 def list_items(
     *,
     status: str | None = None,
     topic: str | None = None,
     query: str | None = None,
+    starred: bool = False,
     limit: int = 50,
 ) -> list[dict]:
-    """List items, newest first. Dismissed items only appear when asked for explicitly."""
+    """List items, newest first.
+
+    Dismissed items only appear when asked for explicitly. With starred=True, all favorites are
+    returned regardless of read/saved state.
+    """
     clauses, params = [], []
-    if status:
+    if starred:
+        clauses.append("starred = 1")
+    elif status:
         clauses.append("status = ?")
         params.append(status)
     else:
@@ -121,8 +160,10 @@ def list_items(
         clauses.append("topic = ?")
         params.append(topic)
     if query:
-        clauses.append("(title LIKE ? OR bullets LIKE ? OR author LIKE ?)")
-        params.extend([f"%{query}%"] * 3)
+        clauses.append(
+            "(title LIKE ? OR bullets LIKE ? OR author LIKE ? OR notes LIKE ?)"
+        )
+        params.extend([f"%{query}%"] * 4)
     sql = (
         "SELECT * FROM items WHERE "
         + " AND ".join(clauses)
@@ -139,9 +180,16 @@ def counts() -> dict:
         rows = conn.execute(
             "SELECT status, COUNT(*) AS n FROM items GROUP BY status"
         ).fetchall()
+        starred = conn.execute(
+            "SELECT COUNT(*) AS n FROM items WHERE starred = 1"
+        ).fetchone()["n"]
         topics = conn.execute(
             "SELECT topic, COUNT(*) AS n FROM items WHERE status != 'dismissed' GROUP BY topic ORDER BY n DESC"
         ).fetchall()
     by_status = dict.fromkeys(STATUSES, 0)
     by_status.update({r["status"]: r["n"] for r in rows})
-    return {"status": by_status, "topics": {r["topic"]: r["n"] for r in topics}}
+    return {
+        "status": by_status,
+        "starred": starred,
+        "topics": {r["topic"]: r["n"] for r in topics},
+    }

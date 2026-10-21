@@ -2,6 +2,7 @@
 
 import html
 import threading
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -20,6 +21,7 @@ _TABS = [
     ("bookmarked", "Saved for later"),
     ("read", "Read"),
     ("dismissed", "Dismissed"),
+    ("favorites", "★ Favorites"),
 ]
 
 _CSS = """
@@ -40,6 +42,13 @@ ul{margin:8px 0;padding-left:20px}li{margin:3px 0}
 button{font:inherit;font-size:.85rem;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
 button:hover{border-color:var(--accent)}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 .empty{color:var(--muted);padding:32px 0;text-align:center}.note{color:var(--muted);font-size:.85rem}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+button.star{border:none;background:none;font-size:1.4rem;line-height:1;padding:0 4px;color:var(--muted)}
+button.star.on{color:#f59e0b}button.star:hover{color:#f59e0b}
+.mynotes{margin-top:12px;border-top:1px dashed var(--line);padding-top:10px}
+.mynotes label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:4px}
+textarea{width:100%;min-height:90px;font:inherit;font-size:.9rem;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:vertical}
+.kept{white-space:pre-wrap;font-size:.9rem;color:var(--muted)}
 """
 
 
@@ -49,8 +58,25 @@ def _check_host(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Local access only")
 
 
-def _card(item: dict, tab: str) -> str:
+def _return_url(tab: str, topic: str) -> str:
+    tab = tab if tab in dict(_TABS) else "new"
+    params = {"tab": tab}
+    if topic in TOPICS:
+        params["topic"] = topic
+    return "/?" + urlencode(params)
+
+
+def _hidden(tab: str, topic: str) -> str:
     e = html.escape
+    return (
+        f'<input type="hidden" name="tab" value="{e(tab, quote=True)}">'
+        f'<input type="hidden" name="topic" value="{e(topic, quote=True)}">'
+    )
+
+
+def _card(item: dict, tab: str, topic: str) -> str:
+    e = html.escape
+    item_id = item["id"]
     bullets = "".join(f"<li>{e(b)}</li>" for b in item["bullets"])
     by = f" · {e(item['author'])}" if item["author"] else ""
     when = f" · {e(item['published'])}" if item["published"] else ""
@@ -63,16 +89,43 @@ def _card(item: dict, tab: str) -> str:
         buttons.append(("dismissed", "Dismiss", ""))
     if item["status"] != "new":
         buttons.append(("new", "Move to New", ""))
+    hidden = _hidden(tab, topic)
     forms = "".join(
-        f'<form method="post" action="/items/{item["id"]}/status">'
-        f'<input type="hidden" name="status" value="{s}"><input type="hidden" name="tab" value="{e(tab)}">'
+        f'<form method="post" action="/items/{item_id}/status">'
+        f'<input type="hidden" name="status" value="{s}">{hidden}'
         f'<button class="{cls}">{label}</button></form>'
         for s, label, cls in buttons
     )
+    starred = item["starred"]
+    star = (
+        f'<form method="post" action="/items/{item_id}/star">'
+        f'<input type="hidden" name="starred" value="{0 if starred else 1}">{hidden}'
+        f'<button class="star {"on" if starred else ""}" '
+        f'title="{"Remove from favorites" if starred else "Add to favorites"}" '
+        f'aria-label="{"Remove from favorites" if starred else "Add to favorites"}">'
+        f"{'★' if starred else '☆'}</button></form>"
+    )
+    notes = ""
+    if starred:
+        notes = (
+            f'<form class="mynotes" method="post" action="/items/{item_id}/notes">{hidden}'
+            f'<label for="n{item_id}">My notes</label>'
+            f'<textarea id="n{item_id}" name="notes" maxlength="{db.MAX_NOTES_CHARS}" '
+            f'placeholder="Your takeaways, how you would apply this, questions...">'
+            f"{e(item['notes'])}</textarea>"
+            f'<div class="actions"><button class="primary">Save notes</button></div></form>'
+        )
+    elif item["notes"]:
+        notes = (
+            f'<div class="mynotes"><label>My notes (star to edit)</label>'
+            f'<div class="kept">{e(item["notes"])}</div></div>'
+        )
     return (
-        f'<article class="card"><h3><a href="{e(item["url"], quote=True)}" target="_blank" rel="noopener noreferrer">'
-        f'{e(item["title"])}</a></h3><div class="meta">{e(item["source"])}{by}{when}</div>'
-        f'<ul>{bullets}</ul><div class="actions">{forms}</div></article>'
+        f'<article class="card"><div class="head"><h3>'
+        f'<a href="{e(item["url"], quote=True)}" target="_blank" rel="noopener noreferrer">'
+        f"{e(item['title'])}</a></h3>{star}</div>"
+        f'<div class="meta">{e(item["source"])}{by}{when}</div>'
+        f'<ul>{bullets}</ul><div class="actions">{forms}</div>{notes}</article>'
     )
 
 
@@ -81,14 +134,19 @@ def index(request: Request, tab: str = "new", topic: str = "") -> str:
     _check_host(request)
     if tab not in dict(_TABS):
         tab = "new"
+    topic = topic if topic in TOPICS else ""
     counts = db.counts()
-    items = db.list_items(status=tab, topic=topic or None, limit=200)
+    if tab == "favorites":
+        items = db.list_items(starred=True, topic=topic or None, limit=200)
+    else:
+        items = db.list_items(status=tab, topic=topic or None, limit=200)
+    tab_counts = {**counts["status"], "favorites": counts["starred"]}
     nav = "".join(
-        f'<a class="{"on" if t == tab else ""}" href="/?tab={t}">{label} ({counts["status"].get(t, 0)})</a>'
+        f'<a class="{"on" if t == tab else ""}" href="/?tab={t}">{label} ({tab_counts.get(t, 0)})</a>'
         for t, label in _TABS
     )
     topic_links = "".join(
-        f'<a class="{"on" if topic == t else ""}" href="/?tab={tab}&topic={html.escape(t, quote=True)}">'
+        f'<a class="{"on" if topic == t else ""}" href="/?{html.escape(urlencode({"tab": tab, "topic": t}))}">'
         f"{html.escape(t)} ({n})</a>"
         for t, n in counts["topics"].items()
     )
@@ -97,11 +155,15 @@ def index(request: Request, tab: str = "new", topic: str = "") -> str:
         group = [i for i in items if i["topic"] == t]
         if group:
             sections.append(
-                f"<h2>{html.escape(t)}</h2>" + "".join(_card(i, tab) for i in group)
+                f"<h2>{html.escape(t)}</h2>"
+                + "".join(_card(i, tab, topic) for i in group)
             )
-    body = (
-        "".join(sections) or '<p class="empty">Nothing here yet. Try “Refresh now”.</p>'
+    empty = (
+        "No favorites yet. Click the ☆ on an article to add it."
+        if tab == "favorites"
+        else "Nothing here yet. Try “Refresh now”."
     )
+    body = "".join(sections) or f'<p class="empty">{empty}</p>'
     state = "Refreshing…" if _refresh_state["running"] else _refresh_state["last"]
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>PM Learning Feed</title>
@@ -113,15 +175,50 @@ def index(request: Request, tab: str = "new", topic: str = "") -> str:
 
 @app.post("/items/{item_id}/status")
 def update_status(
-    request: Request, item_id: int, status: str = Form(...), tab: str = Form("new")
+    request: Request,
+    item_id: int,
+    status: str = Form(...),
+    tab: str = Form("new"),
+    topic: str = Form(""),
 ):
     _check_host(request)
     if status not in db.STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status")
     if not db.set_status(item_id, status):
         raise HTTPException(status_code=404, detail="Item not found")
-    tab = tab if tab in dict(_TABS) else "new"
-    return RedirectResponse(f"/?tab={tab}", status_code=303)
+    return RedirectResponse(_return_url(tab, topic), status_code=303)
+
+
+@app.post("/items/{item_id}/star")
+def update_star(
+    request: Request,
+    item_id: int,
+    starred: int = Form(...),
+    tab: str = Form("new"),
+    topic: str = Form(""),
+):
+    _check_host(request)
+    if not db.set_star(item_id, bool(starred)):
+        raise HTTPException(status_code=404, detail="Item not found")
+    return RedirectResponse(_return_url(tab, topic), status_code=303)
+
+
+@app.post("/items/{item_id}/notes")
+def update_notes(
+    request: Request,
+    item_id: int,
+    notes: str = Form(""),
+    tab: str = Form("new"),
+    topic: str = Form(""),
+):
+    _check_host(request)
+    item = db.get_item(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not item["starred"]:
+        raise HTTPException(status_code=400, detail="Star the item to add notes")
+    db.set_notes(item_id, notes)
+    return RedirectResponse(_return_url(tab, topic), status_code=303)
 
 
 def _run_refresh() -> None:

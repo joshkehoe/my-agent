@@ -97,9 +97,11 @@ See the [A2A Inspector docs](https://github.com/a2aproject/a2a-inspector) for de
 
 The agent curates learning material for becoming an AI-native product manager, focused on
 [Product Faculty](https://productfaculty.com) and its founder and instructors. Items are grouped by
-topic with short bullet summaries, and you can mark them read, save them for later, or dismiss them.
+topic with short bullet summaries. You can mark items read, save them for later, or dismiss them, and
+star your favorites (there's a Favorites filter) and write your own notes on them.
 
-- **Chat with it:** `agents-cli playground`, then ask e.g. "what's new on evals?" or "save item 4".
+- **Chat with it:** `agents-cli playground`, then ask e.g. "what's new on evals?", "save item 4",
+  "star item 7" or "add a note to item 7: try this in our next roadmap review".
 - **Browse and triage:** `uv run uvicorn app.feed.web:app --port 8090`, then open <http://127.0.0.1:8090>.
 - **Refresh content:** `uv run python -m app.feed.ingest` (reads the Product Faculty sitemap and searches the
   web for the instructors' recent public writing; never LinkedIn). Existing items and your read /
