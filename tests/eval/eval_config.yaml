@@ -1,13 +1,20 @@
+# Agent evals for the PM learning feed. See tests/eval/README.md for how to run them.
 metrics_to_run:
-  - custom_response_quality
+  - tool_behavior
+  - response_checks
+  - no_invented_links
+  - answer_quality
 
 custom_metrics:
-  # Default: local LLM-as-judge (see response_quality.py). Runs in-process via
-  # google-genai on Agent Platform (ADC) or Google AI Studio (GEMINI_API_KEY).
-  - name: custom_response_quality
-    custom_function_file: response_quality.py
-  - name: agent_turn_count
-    custom_function: |
-      def evaluate(instance):
-          turns = (instance.get("agent_data") or {}).get("turns", [])
-          return {'score': len(turns)}
+  # Deterministic checks (no LLM): driven by each case's `expect` field.
+  - name: tool_behavior
+    custom_function_file: metric_tool_behavior.py
+  - name: response_checks
+    custom_function_file: metric_response_checks.py
+  - name: no_invented_links
+    custom_function_file: metric_no_invented_links.py
+
+  # LLM judge for things code can't check: grounding, format, tone and not guessing.
+  # Runs locally (see metric_answer_quality.py) and returns schema-checked JSON.
+  - name: answer_quality
+    custom_function_file: metric_answer_quality.py

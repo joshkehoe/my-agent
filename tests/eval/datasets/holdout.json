@@ -1,0 +1,99 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "holdout_favorite_by_title",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Favorite the article about the five phases of AI product strategy."
+          }
+        ]
+      },
+      "expect": {
+        "must_call": [
+          {
+            "name": "star_item",
+            "args": {
+              "item_id": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "eval_case_id": "holdout_two_reads",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Mark items 1 and 4 as read."
+          }
+        ]
+      },
+      "expect": {
+        "must_call": [
+          {
+            "name": "mark_item",
+            "args": {
+              "item_id": 1,
+              "status": "read"
+            }
+          },
+          {
+            "name": "mark_item",
+            "args": {
+              "item_id": 4,
+              "status": "read"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "eval_case_id": "holdout_saved_list",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "What have I saved for later?"
+          }
+        ]
+      },
+      "expect": {
+        "must_call": [
+          {
+            "name": "search_feed",
+            "args": {
+              "status": "bookmarked"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "eval_case_id": "holdout_append_note",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Add to my notes on item 1: also share with design."
+          }
+        ]
+      },
+      "expect": {
+        "must_call": [
+          {
+            "name": "save_note",
+            "args": {
+              "item_id": 1
+            },
+            "args_contain": {
+              "note": "design"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
