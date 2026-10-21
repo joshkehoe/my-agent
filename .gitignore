@@ -215,3 +215,6 @@ credentials*.json
 
 # Local PM learning feed database
 data/
+
+# Eval outputs and fixture databases
+artifacts/
