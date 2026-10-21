@@ -25,18 +25,25 @@ MODEL = "gemini-3.8-flash"
 
 
 def search_feed(
-    topic: str = "", status: str = "new", query: str = "", limit: int = 10
+    topic: str = "",
+    status: str = "new",
+    query: str = "",
+    favorites_only: bool = False,
+    limit: int = 10,
 ) -> dict:
     """Look up items in the user's PM learning feed.
 
     Args:
         topic: Optional topic filter. One of the topics returned by get_feed_overview.
-        status: One of "new", "read", "bookmarked" or "dismissed". Defaults to "new".
-        query: Optional text to match against titles, summaries and authors.
+        status: One of "new", "read", "bookmarked" or "dismissed". Defaults to "new". Ignored when
+            favorites_only is true.
+        query: Optional text to match against titles, summaries, authors and the user's notes.
+        favorites_only: If true, return the user's starred favorites regardless of status.
         limit: Maximum number of items to return (1-25).
 
     Returns:
-        A dict with a list of items, each with id, title, url, source, author, topic and bullets.
+        A dict with a list of items, each with id, title, url, source, author, topic, bullets,
+        starred and the user's notes.
     """
     if status not in db.STATUSES:
         return {"error": f"status must be one of {list(db.STATUSES)}"}
@@ -44,6 +51,7 @@ def search_feed(
         status=status,
         topic=topic or None,
         query=query or None,
+        starred=favorites_only,
         limit=min(max(limit, 1), 25),
     )
     return {
@@ -60,6 +68,8 @@ def search_feed(
                     "topic",
                     "bullets",
                     "published",
+                    "starred",
+                    "notes",
                 )
             }
             for i in items
@@ -95,6 +105,50 @@ def mark_item(item_id: int, status: str) -> dict:
     return {"ok": True, "id": item_id, "title": item["title"], "status": status}
 
 
+def star_item(item_id: int, starred: bool = True) -> dict:
+    """Add an item to the user's favorites, or remove it.
+
+    Args:
+        item_id: The numeric id of the item, from search_feed.
+        starred: True to add to favorites, False to remove. Notes are kept if removed.
+
+    Returns:
+        A dict saying whether the update succeeded.
+    """
+    item = db.get_item(item_id)
+    if not item:
+        return {"ok": False, "error": f"No item with id {item_id}"}
+    db.set_star(item_id, starred)
+    return {"ok": True, "id": item_id, "title": item["title"], "starred": starred}
+
+
+def save_note(item_id: int, note: str, append: bool = False) -> dict:
+    """Save the user's own notes or commentary on a favorite item.
+
+    Only starred (favorite) items can have notes. If the item is not starred, ask the user whether to
+    star it first. Save the user's words as they gave them; do not rewrite or embellish them.
+
+    Args:
+        item_id: The numeric id of the item.
+        note: The note text. An empty string clears the notes.
+        append: If true, add to the existing notes instead of replacing them.
+
+    Returns:
+        A dict saying whether the note was saved.
+    """
+    item = db.get_item(item_id)
+    if not item:
+        return {"ok": False, "error": f"No item with id {item_id}"}
+    if not item["starred"]:
+        return {
+            "ok": False,
+            "error": "Item is not a favorite. Star it first (star_item).",
+        }
+    text = f"{item['notes']}\n\n{note}".strip() if append and item["notes"] else note
+    db.set_notes(item_id, text)
+    return {"ok": True, "id": item_id, "title": item["title"]}
+
+
 def refresh_feed(max_new_pages: int = 5) -> dict:
     """Check Product Faculty for new pages and add them to the feed. This can take a few minutes.
 
@@ -119,6 +173,11 @@ How to work:
   summary (keep the bullets as stored, 3-5 of them). Include the item id so the user can refer to it.
 - When the user says they read, want to save, or are not interested in an item, call mark_item
   ("read", "bookmarked", "dismissed"). Confirm what you changed. Never dismiss an item the user did not ask to dismiss.
+- Favorites are items the user starred. Use star_item when they ask to favorite or unfavorite something, and
+  search_feed with favorites_only=true to show them. Show the user's notes under each favorite.
+- Notes are the user's own words. Use save_note to store them exactly as given (append=true to add to existing
+  notes). Notes only work on favorites, so offer to star the item first if needed. Never write notes on the
+  user's behalf unless they ask you to.
 - By default show "new" items. Offer to show saved ("bookmarked") items when relevant.
 - Use refresh_feed only when the user asks for fresh content. Say it may take a few minutes.
 - If the feed is empty or has nothing on a topic, say so and offer to refresh. Do not fill gaps from memory
@@ -137,7 +196,14 @@ root_agent = Agent(
         retry_options=types.HttpRetryOptions(attempts=3),
     ),
     instruction=INSTRUCTION,
-    tools=[search_feed, get_feed_overview, mark_item, refresh_feed],
+    tools=[
+        search_feed,
+        get_feed_overview,
+        mark_item,
+        star_item,
+        save_note,
+        refresh_feed,
+    ],
 )
 
 app = App(
